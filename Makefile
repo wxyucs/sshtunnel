@@ -7,4 +7,4 @@ run:
 		-p 1080:1080 \
 		-v `pwd`/ssh_keys:/ssh_keys:ro \
 		--env-file ./my.env \
-		sshtunnel:latest
+		wxyucs/sshtunnel:latest
