@@ -24,13 +24,12 @@ jobs:
       -
         name: Set outputs
         id: vars
-        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-      -
-        name: Check outputs
-        run: echo ${{ steps.vars.outputs.sha_short }}
+        run: echo "sha_short=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_OUTPUT
       -
         name: Build and push
         uses: docker/build-push-action@v3
         with:
           push: true
-          tags: wxyucs/sshtunnel:latest
+          tags: |
+            wxyucs/sshtunnel:latest
+            wxyucs/sshtunnel:${{ steps.vars.outputs.sha_short }}
