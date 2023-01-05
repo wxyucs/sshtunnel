@@ -1,6 +1,8 @@
 #!/bin/ash
 set -e
 
+privoxy /etc/privoxy/config
+
 ssh -o StrictHostKeyChecking=no \
     -o ServerAliveInterval=15 \
     -o ServerAliveCountMax=3 \

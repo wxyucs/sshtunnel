@@ -1,5 +1,5 @@
 # sshtunnel
-A containerized auto-restart ssh tunnel.
+A containerized auto-restart ssh tunnel. Provides SOCKS proxy(port 1080) and HTTP proxy(port 1087).
 
 ## Usage
 
@@ -19,7 +19,14 @@ cp example.env my.env
 vi my.env
 ```
 
-4. Start the sshtunnel
+4. Start the sshtunnel:
 ```shell
 make run
+```
+
+5. Test:
+```shell
+export HTTP_PROXY=http://localhost:1087
+export HTTPS_PROXY=http://localhost:1087
+curl ifconfig.me
 ```
