@@ -30,4 +30,4 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           push: true
-          tags: wxyucs/sshtunnel:${{ steps.vars.outputs.sha_short }}
+          tags: wxyucs/sshtunnel:latest
