@@ -335,6 +335,15 @@ def wait_for(
     return predicate()
 
 
+def spawned_state_ready(path: Path, process: subprocess.Popen[Any], token: str) -> bool:
+    state = read_json(path) or {}
+    return (
+        process.poll() is None
+        and state.get("pid") == process.pid
+        and state.get("token") == token
+    )
+
+
 def start_proxy(config: Dict[str, Any], proxy: Dict[str, Any]) -> Tuple[bool, str]:
     ensure_runtime_dirs(config)
     name = proxy["name"]
@@ -722,12 +731,15 @@ def start_web(config: Dict[str, Any]) -> Tuple[bool, str]:
             )
         _DETACHED_CHILDREN.append(process)
         started = wait_for(
-            lambda: web_status(config)["running"] or process.poll() is not None,
-            timeout=5,
+            lambda: spawned_state_ready(
+                web_state_path(config), process, token
+            )
+            or process.poll() is not None,
+            timeout=15,
         )
-        status = web_status(config)
-        if started and status["running"]:
-            return True, f"web: started at {status['url']} (pid {status['pid']})"
+        if started and spawned_state_ready(web_state_path(config), process, token):
+            url = f"http://{config['web']['bind_host']}:{config['web']['port']}/"
+            return True, f"web: started at {url} (pid {process.pid})"
         return False, f"web: failed to start; see {log_path}"
 
 

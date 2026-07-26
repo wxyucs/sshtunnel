@@ -151,7 +151,11 @@ class SSHTunnelTests(unittest.TestCase):
         config = self.write_config()
         proxy = config["proxies"]["primary"]
         self.assertTrue(sshtunnel.start_proxy(config, proxy)[0])
-        self.assertTrue(sshtunnel.start_web(config)[0])
+        web_started, message = sshtunnel.start_web(config)
+        if not web_started:
+            log_path = Path(sshtunnel.web_log_path(config))
+            log = log_path.read_text(encoding="utf-8") if log_path.exists() else "(no log)"
+            self.fail(f"{message}\n{log}")
 
         url = sshtunnel.web_status(config)["url"]
         with urllib.request.urlopen(f"{url}api/status", timeout=3) as response:
