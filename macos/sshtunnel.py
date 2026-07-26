@@ -226,25 +226,53 @@ def named_lock(config: Dict[str, Any], name: str) -> Iterable[None]:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def process_matches(pid: Any, token: Any) -> bool:
+def lease_path(config: Dict[str, Any], token: str) -> Path:
+    return config["state_dir"] / "locks" / f"lease-{token}.lock"
+
+
+def acquire_process_lease(
+    config: Dict[str, Any], token: str
+) -> Tuple[Any, Path]:
+    path = lease_path(config, token)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lease_file = path.open("a+", encoding="utf-8")
+    fcntl.flock(lease_file.fileno(), fcntl.LOCK_EX)
+    return lease_file, path
+
+
+def release_process_lease(lease_file: Any, path: Path) -> None:
+    fcntl.flock(lease_file.fileno(), fcntl.LOCK_UN)
+    lease_file.close()
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+
+
+def process_matches(config: Dict[str, Any], pid: Any, token: Any) -> bool:
     if not isinstance(pid, int) or pid <= 1 or not isinstance(token, str) or not token:
         return False
     try:
         os.kill(pid, 0)
     except (ProcessLookupError, PermissionError):
         return False
-    result = subprocess.run(
-        ["/bin/ps", "-ww", "-p", str(pid), "-o", "command="],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0 and token in result.stdout
+    path = lease_path(config, token)
+    try:
+        lease_file = path.open("r+", encoding="utf-8")
+    except FileNotFoundError:
+        return False
+    try:
+        try:
+            fcntl.flock(lease_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(lease_file.fileno(), fcntl.LOCK_UN)
+        return False
+    finally:
+        lease_file.close()
 
 
 def proxy_status(config: Dict[str, Any], proxy: Dict[str, Any]) -> Dict[str, Any]:
     state = read_json(proxy_state_path(config, proxy["name"])) or {}
-    running = process_matches(state.get("pid"), state.get("token"))
+    running = process_matches(config, state.get("pid"), state.get("token"))
     phase = state.get("phase") if running else "stopped"
     return {
         "name": proxy["name"],
@@ -263,7 +291,7 @@ def proxy_status(config: Dict[str, Any], proxy: Dict[str, Any]) -> Dict[str, Any
 
 def web_status(config: Dict[str, Any]) -> Dict[str, Any]:
     state = read_json(web_state_path(config)) or {}
-    running = process_matches(state.get("pid"), state.get("token"))
+    running = process_matches(config, state.get("pid"), state.get("token"))
     return {
         "running": running,
         "pid": state.get("pid") if running else None,
@@ -342,18 +370,24 @@ def start_proxy(config: Dict[str, Any], proxy: Dict[str, Any]) -> Tuple[bool, st
 
 
 def terminate_detached(
-    pid: int, token: str, child_pid: Optional[int] = None, timeout: float = 10
+    config: Dict[str, Any],
+    pid: int,
+    token: str,
+    child_pid: Optional[int] = None,
+    timeout: float = 10,
 ) -> None:
     with contextlib.suppress(ProcessLookupError):
         os.kill(pid, signal.SIGTERM)
-    exited = wait_for(lambda: not process_matches(pid, token), timeout=timeout)
+    exited = wait_for(
+        lambda: not process_matches(config, pid, token), timeout=timeout
+    )
     if not exited:
         if isinstance(child_pid, int) and child_pid > 1:
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.kill(child_pid, signal.SIGTERM)
         with contextlib.suppress(ProcessLookupError):
             os.kill(pid, signal.SIGKILL)
-        wait_for(lambda: not process_matches(pid, token), timeout=2)
+        wait_for(lambda: not process_matches(config, pid, token), timeout=2)
 
 
 def stop_proxy(config: Dict[str, Any], proxy: Dict[str, Any]) -> Tuple[bool, str]:
@@ -362,17 +396,17 @@ def stop_proxy(config: Dict[str, Any], proxy: Dict[str, Any]) -> Tuple[bool, str
     with named_lock(config, f"proxy-{name}"):
         state_path = proxy_state_path(config, name)
         state = read_json(state_path) or {}
-        if not process_matches(state.get("pid"), state.get("token")):
+        if not process_matches(config, state.get("pid"), state.get("token")):
             with contextlib.suppress(FileNotFoundError):
                 state_path.unlink()
             return True, f"{name}: already stopped"
 
         pid = state["pid"]
         token = state["token"]
-        terminate_detached(pid, token, state.get("child_pid"))
+        terminate_detached(config, pid, token, state.get("child_pid"))
         with contextlib.suppress(FileNotFoundError):
             state_path.unlink()
-        if process_matches(pid, token):
+        if process_matches(config, pid, token):
             return False, f"{name}: could not stop pid {pid}"
         return True, f"{name}: stopped"
 
@@ -438,6 +472,7 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
     }
     command = build_ssh_command(proxy)
     last_exit_code: Optional[int] = None
+    lease_file, held_lease_path = acquire_process_lease(config, token)
 
     try:
         while not stop_event.is_set():
@@ -509,6 +544,7 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
         if state.get("token") == token:
             with contextlib.suppress(FileNotFoundError):
                 state_path.unlink()
+        release_process_lease(lease_file, held_lease_path)
     return 0
 
 
@@ -635,6 +671,7 @@ def serve_web(config: Dict[str, Any], token: str) -> int:
     state_path = web_state_path(config)
     server = ThreadingHTTPServer((host, port), make_handler(config["path"]))
     server.daemon_threads = True
+    lease_file, held_lease_path = acquire_process_lease(config, token)
 
     def handle_stop(_signum: int, _frame: Any) -> None:
         threading.Thread(target=server.shutdown, daemon=True).start()
@@ -659,6 +696,7 @@ def serve_web(config: Dict[str, Any], token: str) -> int:
         if state.get("token") == token:
             with contextlib.suppress(FileNotFoundError):
                 state_path.unlink()
+        release_process_lease(lease_file, held_lease_path)
     return 0
 
 
@@ -698,16 +736,16 @@ def stop_web(config: Dict[str, Any]) -> Tuple[bool, str]:
     with named_lock(config, "web"):
         state_path = web_state_path(config)
         state = read_json(state_path) or {}
-        if not process_matches(state.get("pid"), state.get("token")):
+        if not process_matches(config, state.get("pid"), state.get("token")):
             with contextlib.suppress(FileNotFoundError):
                 state_path.unlink()
             return True, "web: already stopped"
         pid = state["pid"]
         token = state["token"]
-        terminate_detached(pid, token)
+        terminate_detached(config, pid, token)
         with contextlib.suppress(FileNotFoundError):
             state_path.unlink()
-        if process_matches(pid, token):
+        if process_matches(config, pid, token):
             return False, f"web: could not stop pid {pid}"
         return True, "web: stopped"
 

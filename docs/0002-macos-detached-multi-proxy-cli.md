@@ -130,8 +130,10 @@ SSH 意外退出后，supervisor 只等待该代理的 `restart_delay`，然后�
 ```
 
 至少包含 supervisor PID、随机 token、当前阶段、启动时间和 SSH 子进程 PID。
-CLI 判断进程身份时必须同时验证 PID 存在且进程命令行包含对应 token，不能只依赖
-PID 文件。停止操作先向 supervisor 发送 `SIGTERM`，由 supervisor 转发给 SSH；
+每个 supervisor 必须在整个生命周期持有与随机 token 对应的独占 lease 文件锁。
+CLI 判断进程身份时同时验证 PID 存在且 lease 仍被持有，不能只依赖 PID 文件或
+平台相关的 `ps` 命令输出。进程退出时内核自动释放文件锁，从而避免 PID 复用
+造成误判。停止操作先向 supervisor 发送 `SIGTERM`，由 supervisor 转发给 SSH；
 超时后才允许分别清理子进程和 supervisor。
 
 每个代理必须使用独立 advisory lock，避免同名代理的并发启停竞态。
