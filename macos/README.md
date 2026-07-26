@@ -75,9 +75,10 @@ vi ~/.config/sshtunnel/config.json
 端口冲突。首次启动前先手动连接 SSH 服务器，核对并写入 `known_hosts`。后台
 任务启用了 `BatchMode=yes`，不能处理交互式密码或主机密钥确认。
 
-`status`、JSON API 和 Web 页面会调用 `ssh -G` 读取 OpenSSH 的最终配置，并显示
-`ProxyJump`。运行中的代理显示该 SSH 子进程启动时解析到的跳板；未运行的代理显示
-当前配置将使用的跳板。没有配置跳板时显示 `-`，JSON 中为 `null`。
+`status`、JSON API 和 Web 页面会检查正在运行的 SSH 进程树，并显示当前真实
+`ProxyJump` 链路。运行中的直连显示 `direct`，检测到跳板时显示跳板名称或跳板链；
+停止的代理显示 `-`。如果进程检查失败则显示 `unknown`，不会用下一次启动的 SSH
+配置冒充当前链路。JSON 同时提供 `proxy_jump` 和 `proxy_jump_status`。
 
 修改或删除代理配置前建议先执行 `sshtunnel stop`。如果代理已从配置中删除但
 状态目录未改变，无名称的 `stop` 仍会扫描状态文件并清理它；修改 `state_dir`

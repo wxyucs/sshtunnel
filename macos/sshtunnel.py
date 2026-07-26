@@ -11,6 +11,7 @@ import html
 import json
 import os
 import re
+import shlex
 import signal
 import socket
 import socketserver
@@ -287,14 +288,73 @@ def process_matches(config: Dict[str, Any], pid: Any, token: Any) -> bool:
         lease_file.close()
 
 
-def proxy_status(config: Dict[str, Any], proxy: Dict[str, Any]) -> Dict[str, Any]:
+def process_snapshot() -> Optional[Dict[int, Tuple[int, str]]]:
+    try:
+        result = subprocess.run(
+            ["/bin/ps", "-axww", "-o", "pid=,ppid=,command="],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+
+    processes: Dict[int, Tuple[int, str]] = {}
+    for line in result.stdout.splitlines():
+        match = re.match(r"^\s*(\d+)\s+(\d+)\s+(.*)$", line)
+        if match:
+            processes[int(match.group(1))] = (int(match.group(2)), match.group(3))
+    return processes
+
+
+def running_proxy_jump(
+    child_pid: Any, processes: Optional[Dict[int, Tuple[int, str]]]
+) -> Tuple[Optional[str], str]:
+    if not isinstance(child_pid, int) or processes is None or child_pid not in processes:
+        return None, "unknown"
+
+    children: Dict[int, List[int]] = {}
+    for pid, (parent_pid, _command) in processes.items():
+        children.setdefault(parent_pid, []).append(pid)
+
+    jump_targets: List[str] = []
+
+    def inspect_descendants(parent_pid: int) -> None:
+        for pid in children.get(parent_pid, []):
+            command = processes[pid][1]
+            try:
+                arguments = shlex.split(command)
+            except ValueError:
+                arguments = []
+            if (
+                len(arguments) >= 2
+                and Path(arguments[0]).name == "ssh"
+                and any(argument == "-W" or argument.startswith("-W") for argument in arguments)
+            ):
+                jump_targets.append(arguments[-1])
+            inspect_descendants(pid)
+
+    inspect_descendants(child_pid)
+    if not jump_targets:
+        return None, "direct"
+    return " -> ".join(reversed(jump_targets)), "active"
+
+
+def proxy_status(
+    config: Dict[str, Any],
+    proxy: Dict[str, Any],
+    processes: Optional[Dict[int, Tuple[int, str]]] = None,
+) -> Dict[str, Any]:
     state = read_json(proxy_state_path(config, proxy["name"])) or {}
     running = process_matches(config, state.get("pid"), state.get("token"))
     phase = state.get("phase") if running else "stopped"
-    proxy_jump = (
-        state.get("proxy_jump")
-        if running and "proxy_jump" in state
-        else resolve_proxy_jump(proxy)
+    proxy_jump, proxy_jump_status = (
+        running_proxy_jump(state.get("child_pid"), processes)
+        if running
+        else (None, "stopped")
     )
     return {
         "name": proxy["name"],
@@ -307,6 +367,7 @@ def proxy_status(config: Dict[str, Any], proxy: Dict[str, Any]) -> Dict[str, Any
         "last_exit_code": state.get("last_exit_code"),
         "ssh_target": f"{proxy['ssh_user']}@{proxy['ssh_host']}:{proxy['ssh_port']}",
         "proxy_jump": proxy_jump,
+        "proxy_jump_status": proxy_jump_status,
         "socks_endpoint": f"{proxy['bind_host']}:{proxy['socks_port']}",
         "log_file": str(proxy_log_path(config, proxy["name"])),
     }
@@ -473,31 +534,6 @@ def build_ssh_command(proxy: Dict[str, Any]) -> List[str]:
     return command
 
 
-def resolve_proxy_jump(proxy: Dict[str, Any]) -> Optional[str]:
-    """Return ProxyJump from OpenSSH's effective configuration."""
-
-    command = build_ssh_command(proxy)
-    command.insert(1, "-G")
-    try:
-        result = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
-        return None
-    for line in result.stdout.splitlines():
-        key, separator, value = line.partition(" ")
-        if separator and key.lower() == "proxyjump":
-            value = value.strip()
-            return value if value and value.lower() != "none" else None
-    return None
-
-
 def supervise(config: Dict[str, Any], name: str, token: str) -> int:
     proxy = config["proxies"].get(name)
     if proxy is None:
@@ -536,7 +572,6 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
 
     try:
         while not stop_event.is_set():
-            proxy_jump = resolve_proxy_jump(proxy)
             write_json(
                 state_path,
                 {
@@ -544,7 +579,6 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
                     "phase": "starting",
                     "child_pid": None,
                     "last_exit_code": last_exit_code,
-                    "proxy_jump": proxy_jump,
                 },
             )
             try:
@@ -559,7 +593,6 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
                         "child_pid": None,
                         "last_exit_code": last_exit_code,
                         "error": str(exc),
-                        "proxy_jump": proxy_jump,
                     },
                 )
                 stop_event.wait(proxy["restart_delay"])
@@ -573,7 +606,6 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
                     "child_pid": child.pid,
                     "command_started_at": now_iso(),
                     "last_exit_code": last_exit_code,
-                    "proxy_jump": proxy_jump,
                 },
             )
             exit_code = child.wait()
@@ -595,7 +627,6 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
                     "phase": "restarting",
                     "child_pid": None,
                     "last_exit_code": exit_code,
-                    "proxy_jump": proxy_jump,
                 },
             )
             stop_event.wait(proxy["restart_delay"])
@@ -614,10 +645,12 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
 
 
 def status_payload(config: Dict[str, Any]) -> Dict[str, Any]:
+    processes = process_snapshot()
     return {
         "generated_at": now_iso(),
         "proxies": [
-            proxy_status(config, proxy) for proxy in config["proxies"].values()
+            proxy_status(config, proxy, processes)
+            for proxy in config["proxies"].values()
         ],
         "web": web_status(config),
     }
@@ -628,6 +661,11 @@ def render_status_html(config: Dict[str, Any]) -> str:
     rows = []
     for proxy in payload["proxies"]:
         css_class = "running" if proxy["running"] else "stopped"
+        proxy_jump = {
+            "direct": "direct",
+            "unknown": "unknown",
+            "stopped": "-",
+        }.get(proxy["proxy_jump_status"], proxy["proxy_jump"] or "unknown")
         rows.append(
             "<tr>"
             f"<td>{html.escape(proxy['name'])}</td>"
@@ -635,7 +673,7 @@ def render_status_html(config: Dict[str, Any]) -> str:
             f"<td><span class=\"badge {css_class}\">{html.escape(proxy['phase'])}</span></td>"
             f"<td>{html.escape(proxy['socks_endpoint'])}</td>"
             f"<td>{html.escape(proxy['ssh_target'])}</td>"
-            f"<td>{html.escape(proxy['proxy_jump'] or '-')}</td>"
+            f"<td>{html.escape(proxy_jump)}</td>"
             f"<td>{proxy['pid'] or '-'}</td>"
             f"<td>{proxy['child_pid'] or '-'}</td>"
             f"<td>{proxy['last_exit_code'] if proxy['last_exit_code'] is not None else '-'}</td>"
@@ -830,7 +868,11 @@ def print_proxy_statuses(statuses: List[Dict[str, Any]]) -> None:
     )
     for status in statuses:
         pid = str(status["pid"]) if status["pid"] else "-"
-        proxy_jump = status["proxy_jump"] or "-"
+        proxy_jump = {
+            "direct": "direct",
+            "unknown": "unknown",
+            "stopped": "-",
+        }.get(status["proxy_jump_status"], status["proxy_jump"] or "unknown")
         print(
             f"{status['name']:<20} {status['phase']:<12} "
             f"{status['socks_endpoint']:<24} {proxy_jump:<20} "
@@ -896,7 +938,8 @@ def command_restart(config: Dict[str, Any], names: List[str], with_web: bool) ->
 
 def command_status(config: Dict[str, Any], names: List[str], as_json: bool) -> int:
     proxies = select_proxies(config, names, default_only=False)
-    statuses = [proxy_status(config, proxy) for proxy in proxies]
+    processes = process_snapshot()
+    statuses = [proxy_status(config, proxy, processes) for proxy in proxies]
     if as_json:
         print(json.dumps({"generated_at": now_iso(), "proxies": statuses}, indent=2))
     else:

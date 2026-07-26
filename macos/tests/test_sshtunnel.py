@@ -30,9 +30,6 @@ class SSHTunnelTests(unittest.TestCase):
         self.fake_ssh = self.root / "fake-ssh"
         self.fake_ssh.write_text(
             "#!/bin/sh\n"
-            "case \" $* \" in\n"
-            "  *\" -G \"*) printf 'proxyjump test-jump\\n'; exit 0 ;;\n"
-            "esac\n"
             "trap 'exit 0' TERM INT\n"
             "while :; do sleep 1; done\n",
             encoding="utf-8",
@@ -183,7 +180,8 @@ class SSHTunnelTests(unittest.TestCase):
         self.assertEqual(payload["proxies"][0]["name"], "primary")
         self.assertTrue(payload["proxies"][0]["running"])
         self.assertTrue(payload["proxies"][0]["start_by_default"])
-        self.assertEqual(payload["proxies"][0]["proxy_jump"], "test-jump")
+        self.assertIsNone(payload["proxies"][0]["proxy_jump"])
+        self.assertEqual(payload["proxies"][0]["proxy_jump_status"], "direct")
         self.assertNotIn("enabled", payload["proxies"][0])
         self.assertNotIn("identity_file", payload["proxies"][0])
         self.assertNotIn("token", payload["proxies"][0])
@@ -196,14 +194,21 @@ class SSHTunnelTests(unittest.TestCase):
         self.assertIn("SSH 代理状态", page)
         self.assertIn("primary", page)
         self.assertIn("ProxyJump", page)
-        self.assertIn("test-jump", page)
+        self.assertIn("direct", page)
 
-    def test_proxy_jump_uses_effective_ssh_configuration(self):
-        config = self.write_config()
-        proxy = config["proxies"]["primary"]
-        self.assertEqual(sshtunnel.resolve_proxy_jump(proxy), "test-jump")
-        status = sshtunnel.proxy_status(config, proxy)
-        self.assertEqual(status["proxy_jump"], "test-jump")
+    def test_proxy_jump_uses_running_process_tree(self):
+        processes = {
+            100: (1, "/usr/bin/ssh -N -D 127.0.0.1:1080 root@target"),
+            101: (100, "/usr/bin/ssh -W [target]:22 intermediate"),
+            102: (101, "/usr/bin/ssh -W [intermediate]:22 edge"),
+        }
+        proxy_jump, status = sshtunnel.running_proxy_jump(100, processes)
+        self.assertEqual(proxy_jump, "edge -> intermediate")
+        self.assertEqual(status, "active")
+
+        proxy_jump, status = sshtunnel.running_proxy_jump(100, {100: processes[100]})
+        self.assertIsNone(proxy_jump)
+        self.assertEqual(status, "direct")
 
     def test_stop_all_cleans_proxy_removed_from_config(self):
         config = self.write_config()

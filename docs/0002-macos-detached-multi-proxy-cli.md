@@ -76,10 +76,11 @@ KeepAlive 语义。当前需求更接近用户显式执行命令后在后台持�
 `ssh_host` 可以是 DNS 主机名、IP 地址或 OpenSSH config 中的别名。路径字段必须
 展开 `~` 和环境变量。
 
-状态命令必须通过 `ssh -G` 解析最终生效的 OpenSSH 配置并输出 `ProxyJump`。
-运行中的代理使用 supervisor 在启动 SSH 子进程前记录的值；停止的代理使用查询
-时的当前配置。这样 SSH config 别名、`-J` 和 `extra_options` 中的 SSH 选项都能
-反映在状态中。解析失败或未配置跳板时显示 `-`。
+状态命令必须检查运行中的 SSH 进程树，以 OpenSSH 为 `ProxyJump` 创建的
+`ssh -W` 子进程为依据输出当前真实跳板链路，不得用 `ssh -G` 的下一次启动配置
+代替当前连接。运行中的直连显示 `direct`，停止显示 `-`，进程检查失败显示
+`unknown`。JSON 必须用 `proxy_jump_status` 区分 `active`、`direct`、`stopped`
+和 `unknown`，并在 `proxy_jump` 中返回已检测到的跳板链。
 
 早期实现使用的 `enabled` 字段容易被理解为禁止运行，实际含义只是是否参与无名称
 的批量启动。参考实现必须将旧 `enabled` 作为 `start_by_default` 的兼容别名读取，

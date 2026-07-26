@@ -85,7 +85,8 @@ HTTP server 绑定本地地址时不得执行 FQDN 或反向 DNS 查询；状态
 - supervisor 是否运行以及当前阶段。
 - 本地 SOCKS5 地址。
 - SSH 用户、主机和端口。
-- OpenSSH 最终配置中的 `ProxyJump`；未配置时 JSON 为 `null`，页面显示 `-`。
+- 运行中 SSH 进程树的真实 `ProxyJump` 链路，以及 `proxy_jump_status`；直连显示
+  `direct`，停止显示 `-`，无法检查时显示 `unknown`。
 - supervisor PID、SSH 子进程 PID和启动时间。
 - 最近一次 SSH 退出码（如有）。
 
