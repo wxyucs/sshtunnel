@@ -57,7 +57,7 @@ KeepAlive 语义。当前需求更接近用户显式执行命令后在后台持�
 | 字段 | 必填 | 默认值 |
 | --- | --- | --- |
 | `name` | 是 | 无 |
-| `enabled` | 否 | `true` |
+| `start_by_default` | 否 | `true` |
 | `ssh_host` | 是 | 无 |
 | `ssh_user` | 是 | 无 |
 | `ssh_port` | 否 | `22` |
@@ -76,6 +76,10 @@ KeepAlive 语义。当前需求更接近用户显式执行命令后在后台持�
 `ssh_host` 可以是 DNS 主机名、IP 地址或 OpenSSH config 中的别名。路径字段必须
 展开 `~` 和环境变量。
 
+早期实现使用的 `enabled` 字段容易被理解为禁止运行，实际含义只是是否参与无名称
+的批量启动。参考实现必须将旧 `enabled` 作为 `start_by_default` 的兼容别名读取，
+但两个字段同时出现时必须报配置错误。状态 API 和页面只使用新名称。
+
 ## CLI
 
 公开命令：
@@ -91,9 +95,9 @@ sshtunnel web <start|stop|restart|status> [--json]
 
 未指定名称时：
 
-- `start` 和 `restart` 选择全部 `enabled=true` 的代理。
+- `start` 和 `restart` 选择全部 `start_by_default=true` 的代理。
 - `stop` 和 `status` 选择配置中的全部代理。
-- 显式名称可以操作 `enabled=false` 的代理。
+- 显式名称可以操作 `start_by_default=false` 的代理。
 
 批量操作必须逐个执行并报告每个代理结果。一个代理失败不得阻止其他代理被操作；
 只要任意操作失败，CLI 最终退出码必须非零。

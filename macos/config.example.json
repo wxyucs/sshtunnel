@@ -7,7 +7,7 @@
   "proxies": [
     {
       "name": "primary",
-      "enabled": true,
+      "start_by_default": true,
       "ssh_host": "proxy-one.example.org",
       "ssh_user": "root",
       "ssh_port": 22,
@@ -20,7 +20,7 @@
     },
     {
       "name": "backup",
-      "enabled": false,
+      "start_by_default": false,
       "ssh_host": "192.0.2.10",
       "ssh_user": "tunnel",
       "ssh_port": 2222,

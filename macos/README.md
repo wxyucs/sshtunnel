@@ -36,7 +36,7 @@ vi ~/.config/sshtunnel/config.json
   "proxies": [
     {
       "name": "primary",
-      "enabled": true,
+      "start_by_default": true,
       "ssh_host": "proxy.example.org",
       "ssh_user": "root",
       "ssh_port": 22,
@@ -56,7 +56,7 @@ vi ~/.config/sshtunnel/config.json
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `name` | 必填 | 唯一代理名称，用于命令、状态文件和日志 |
-| `enabled` | `true` | 无名称执行 `start` 时是否自动启动 |
+| `start_by_default` | `true` | 无名称执行 `start` 时是否启动 |
 | `ssh_host` | 必填 | SSH 主机名、IP 或 SSH config 中的别名 |
 | `ssh_user` | 必填 | SSH 用户 |
 | `ssh_port` | `22` | SSH 服务端口 |
@@ -68,6 +68,9 @@ vi ~/.config/sshtunnel/config.json
 | `restart_delay` | `5` | SSH 退出后的重启等待秒数 |
 | `extra_options` | `[]` | 额外 SSH 参数数组 |
 
+旧配置中的 `enabled` 暂时作为 `start_by_default` 的兼容别名读取；新配置应使用
+`start_by_default`。同一代理同时设置两个字段会被拒绝，避免优先级不明确。
+
 所有代理的 `name` 和本地监听地址/端口组合必须唯一，Web 地址也不能与 SOCKS5
 端口冲突。首次启动前先手动连接 SSH 服务器，核对并写入 `known_hosts`。后台
 任务启用了 `BatchMode=yes`，不能处理交互式密码或主机密钥确认。
@@ -78,11 +81,11 @@ vi ~/.config/sshtunnel/config.json
 
 ## 命令
 
-没有指定代理名称时，`start`/`restart` 操作所有 `enabled` 代理，`stop` 和
-`status` 操作配置中的所有代理：
+没有指定代理名称时，`start`/`restart` 操作所有
+`start_by_default=true` 代理，`stop` 和 `status` 操作配置中的所有代理：
 
 ```sh
-# 一次启动全部 enabled 代理，并启动状态网页
+# 一次启动全部默认代理，并启动状态网页
 sshtunnel start --web
 
 # 只操作指定代理

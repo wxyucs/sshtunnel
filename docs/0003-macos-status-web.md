@@ -81,7 +81,7 @@ HTTP server 绑定本地地址时不得执行 FQDN 或反向 DNS 查询；状态
 
 页面和 API 至少展示：
 
-- 代理名称和 `enabled` 状态。
+- 代理名称和 `start_by_default` 状态，页面列名为“默认启动”。
 - supervisor 是否运行以及当前阶段。
 - 本地 SOCKS5 地址。
 - SSH 用户、主机和端口。

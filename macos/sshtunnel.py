@@ -110,9 +110,15 @@ def load_config(path: Path) -> Dict[str, Any]:
         if name in proxies:
             raise ConfigError(f"duplicate proxy name: {name}")
 
-        enabled = item.get("enabled", True)
-        if not isinstance(enabled, bool):
-            raise ConfigError(f"{prefix}.enabled must be true or false")
+        if "start_by_default" in item and "enabled" in item:
+            raise ConfigError(
+                f"{prefix} cannot contain both start_by_default and deprecated enabled"
+            )
+        start_by_default = item.get(
+            "start_by_default", item.get("enabled", True)
+        )
+        if not isinstance(start_by_default, bool):
+            raise ConfigError(f"{prefix}.start_by_default must be true or false")
 
         bind_host = nonempty_string(item.get("bind_host", "127.0.0.1"), f"{prefix}.bind_host")
         socks_port = integer(item.get("socks_port", 1080), f"{prefix}.socks_port", 1, 65535)
@@ -136,7 +142,7 @@ def load_config(path: Path) -> Dict[str, Any]:
 
         proxies[name] = {
             "name": name,
-            "enabled": enabled,
+            "start_by_default": start_by_default,
             "ssh_host": nonempty_string(item.get("ssh_host"), f"{prefix}.ssh_host"),
             "ssh_user": nonempty_string(item.get("ssh_user"), f"{prefix}.ssh_user"),
             "ssh_port": integer(item.get("ssh_port", 22), f"{prefix}.ssh_port", 1, 65535),
@@ -287,7 +293,7 @@ def proxy_status(config: Dict[str, Any], proxy: Dict[str, Any]) -> Dict[str, Any
     phase = state.get("phase") if running else "stopped"
     return {
         "name": proxy["name"],
-        "enabled": proxy["enabled"],
+        "start_by_default": proxy["start_by_default"],
         "running": running,
         "phase": phase,
         "pid": state.get("pid") if running else None,
@@ -313,7 +319,7 @@ def web_status(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def select_proxies(
-    config: Dict[str, Any], names: List[str], enabled_only: bool
+    config: Dict[str, Any], names: List[str], default_only: bool
 ) -> List[Dict[str, Any]]:
     if names:
         missing = [name for name in names if name not in config["proxies"]]
@@ -321,7 +327,11 @@ def select_proxies(
             raise ConfigError(f"unknown proxy: {', '.join(missing)}")
         return [config["proxies"][name] for name in names]
     proxies = list(config["proxies"].values())
-    return [proxy for proxy in proxies if proxy["enabled"]] if enabled_only else proxies
+    return (
+        [proxy for proxy in proxies if proxy["start_by_default"]]
+        if default_only
+        else proxies
+    )
 
 
 def internal_command(config: Dict[str, Any], command: str, *arguments: str) -> List[str]:
@@ -586,7 +596,7 @@ def render_status_html(config: Dict[str, Any]) -> str:
         rows.append(
             "<tr>"
             f"<td>{html.escape(proxy['name'])}</td>"
-            f"<td>{'yes' if proxy['enabled'] else 'no'}</td>"
+            f"<td>{'yes' if proxy['start_by_default'] else 'no'}</td>"
             f"<td><span class=\"badge {css_class}\">{html.escape(proxy['phase'])}</span></td>"
             f"<td>{html.escape(proxy['socks_endpoint'])}</td>"
             f"<td>{html.escape(proxy['ssh_target'])}</td>"
@@ -621,7 +631,7 @@ def render_status_html(config: Dict[str, Any]) -> str:
   <h1>SSH 代理状态</h1>
   <p>每 5 秒刷新。JSON API：<code>/api/status</code></p>
   <table>
-    <thead><tr><th>名称</th><th>启用</th><th>状态</th><th>SOCKS5</th><th>SSH 目标</th><th>Supervisor PID</th><th>SSH PID</th><th>最近退出码</th><th>启动时间</th></tr></thead>
+    <thead><tr><th>名称</th><th>默认启动</th><th>状态</th><th>SOCKS5</th><th>SSH 目标</th><th>Supervisor PID</th><th>SSH PID</th><th>最近退出码</th><th>启动时间</th></tr></thead>
     <tbody>{''.join(rows)}</tbody>
   </table>
   <p>更新时间：{html.escape(payload['generated_at'])}</p>
@@ -788,7 +798,7 @@ def print_proxy_statuses(statuses: List[Dict[str, Any]]) -> None:
 
 
 def command_start(config: Dict[str, Any], names: List[str], with_web: bool) -> int:
-    proxies = select_proxies(config, names, enabled_only=True)
+    proxies = select_proxies(config, names, default_only=True)
     results = [start_proxy(config, proxy) for proxy in proxies]
     if with_web:
         results.append(start_web(config))
@@ -830,7 +840,7 @@ def command_stop(config: Dict[str, Any], names: List[str], with_web: bool) -> in
 
 
 def command_restart(config: Dict[str, Any], names: List[str], with_web: bool) -> int:
-    proxies = select_proxies(config, names, enabled_only=True)
+    proxies = select_proxies(config, names, default_only=True)
     results: List[Tuple[bool, str]] = []
     for proxy in proxies:
         results.append(stop_proxy(config, proxy))
@@ -844,7 +854,7 @@ def command_restart(config: Dict[str, Any], names: List[str], with_web: bool) ->
 
 
 def command_status(config: Dict[str, Any], names: List[str], as_json: bool) -> int:
-    proxies = select_proxies(config, names, enabled_only=False)
+    proxies = select_proxies(config, names, default_only=False)
     statuses = [proxy_status(config, proxy) for proxy in proxies]
     if as_json:
         print(json.dumps({"generated_at": now_iso(), "proxies": statuses}, indent=2))

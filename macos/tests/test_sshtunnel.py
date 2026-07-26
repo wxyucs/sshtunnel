@@ -97,6 +97,23 @@ class SSHTunnelTests(unittest.TestCase):
         with self.assertRaisesRegex(sshtunnel.ConfigError, "conflicts"):
             self.write_config(proxies=proxies)
 
+    def test_deprecated_enabled_alias_and_conflict(self):
+        legacy = [
+            {
+                "name": "legacy",
+                "enabled": False,
+                "ssh_host": "legacy.test",
+                "ssh_user": "tester",
+                "socks_port": 18080,
+            }
+        ]
+        config = self.write_config(proxies=legacy)
+        self.assertFalse(config["proxies"]["legacy"]["start_by_default"])
+
+        legacy[0]["start_by_default"] = True
+        with self.assertRaisesRegex(sshtunnel.ConfigError, "cannot contain both"):
+            self.write_config(proxies=legacy)
+
     def test_multiple_proxies_are_independent(self):
         config = self.write_config(
             proxies=[
@@ -162,6 +179,8 @@ class SSHTunnelTests(unittest.TestCase):
             payload = json.load(response)
         self.assertEqual(payload["proxies"][0]["name"], "primary")
         self.assertTrue(payload["proxies"][0]["running"])
+        self.assertTrue(payload["proxies"][0]["start_by_default"])
+        self.assertNotIn("enabled", payload["proxies"][0])
         self.assertNotIn("identity_file", payload["proxies"][0])
         self.assertNotIn("token", payload["proxies"][0])
 
