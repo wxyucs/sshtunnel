@@ -678,9 +678,12 @@ def serve_web(config: Dict[str, Any], token: str) -> int:
     host = config["web"]["bind_host"]
     port = config["web"]["port"]
     state_path = web_state_path(config)
+    print(f"{now_iso()} web: binding {host}:{port}", file=sys.stderr, flush=True)
     server = ThreadingHTTPServer((host, port), make_handler(config["path"]))
     server.daemon_threads = True
+    print(f"{now_iso()} web: socket ready", file=sys.stderr, flush=True)
     lease_file, held_lease_path = acquire_process_lease(config, token)
+    print(f"{now_iso()} web: lease acquired", file=sys.stderr, flush=True)
 
     def handle_stop(_signum: int, _frame: Any) -> None:
         threading.Thread(target=server.shutdown, daemon=True).start()
@@ -697,6 +700,7 @@ def serve_web(config: Dict[str, Any], token: str) -> int:
             "port": port,
         },
     )
+    print(f"{now_iso()} web: state ready", file=sys.stderr, flush=True)
     try:
         server.serve_forever(poll_interval=0.25)
     finally:
