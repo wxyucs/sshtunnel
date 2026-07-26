@@ -1,0 +1,14 @@
+[Unit]
+Description=Persistent SSH SOCKS5 tunnel
+Documentation=https://github.com/wxyucs/sshtunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/libexec/sshtunnel/run
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

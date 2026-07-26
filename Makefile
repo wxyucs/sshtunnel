@@ -1,21 +1,22 @@
+.PHONY: help build test run stop logs macos-install macos-uninstall linux-install linux-uninstall
 
-build:
-	docker build --network host -t sshtunnel .
+help:
+	@echo "Container: make build | test | run | stop | logs"
+	@echo "macOS:    make macos-install | macos-uninstall"
+	@echo "Linux:    make linux-install | linux-uninstall"
 
-test:
-	docker run -d --restart=always \
-		--name=sshtunnel-test \
-		-p 1080:1080 \
-		-p 1087:1087 \
-		-v `pwd`/ssh_keys:/ssh_keys:ro \
-		--env-file ./my.env \
-		sshtunnel:latest
+# Backward-compatible container targets.
+build test run stop logs:
+	$(MAKE) -C container $@
 
-run:
-	docker run -d --restart=always \
-		--name=sshtunnel \
-		-p 1080:1080 \
-		-p 1087:1087 \
-		-v `pwd`/ssh_keys:/ssh_keys:ro \
-		--env-file ./my.env \
-		wxyucs/sshtunnel:latest
+macos-install:
+	./macos/install.sh
+
+macos-uninstall:
+	./macos/uninstall.sh
+
+linux-install:
+	./linux/install.sh
+
+linux-uninstall:
+	./linux/uninstall.sh

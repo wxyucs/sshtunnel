@@ -1,2 +1,5 @@
-my.env
-ssh_keys/
+container/my.env
+container/ssh_keys/*
+!container/ssh_keys/.gitkeep
+macos/config.env
+linux/config.env
