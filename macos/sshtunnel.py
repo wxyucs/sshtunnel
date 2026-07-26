@@ -291,6 +291,11 @@ def proxy_status(config: Dict[str, Any], proxy: Dict[str, Any]) -> Dict[str, Any
     state = read_json(proxy_state_path(config, proxy["name"])) or {}
     running = process_matches(config, state.get("pid"), state.get("token"))
     phase = state.get("phase") if running else "stopped"
+    proxy_jump = (
+        state.get("proxy_jump")
+        if running and "proxy_jump" in state
+        else resolve_proxy_jump(proxy)
+    )
     return {
         "name": proxy["name"],
         "start_by_default": proxy["start_by_default"],
@@ -301,6 +306,7 @@ def proxy_status(config: Dict[str, Any], proxy: Dict[str, Any]) -> Dict[str, Any
         "started_at": state.get("started_at") if running else None,
         "last_exit_code": state.get("last_exit_code"),
         "ssh_target": f"{proxy['ssh_user']}@{proxy['ssh_host']}:{proxy['ssh_port']}",
+        "proxy_jump": proxy_jump,
         "socks_endpoint": f"{proxy['bind_host']}:{proxy['socks_port']}",
         "log_file": str(proxy_log_path(config, proxy["name"])),
     }
@@ -467,6 +473,31 @@ def build_ssh_command(proxy: Dict[str, Any]) -> List[str]:
     return command
 
 
+def resolve_proxy_jump(proxy: Dict[str, Any]) -> Optional[str]:
+    """Return ProxyJump from OpenSSH's effective configuration."""
+
+    command = build_ssh_command(proxy)
+    command.insert(1, "-G")
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        key, separator, value = line.partition(" ")
+        if separator and key.lower() == "proxyjump":
+            value = value.strip()
+            return value if value and value.lower() != "none" else None
+    return None
+
+
 def supervise(config: Dict[str, Any], name: str, token: str) -> int:
     proxy = config["proxies"].get(name)
     if proxy is None:
@@ -500,12 +531,12 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
         "token": token,
         "started_at": started_at,
     }
-    command = build_ssh_command(proxy)
     last_exit_code: Optional[int] = None
     lease_file, held_lease_path = acquire_process_lease(config, token)
 
     try:
         while not stop_event.is_set():
+            proxy_jump = resolve_proxy_jump(proxy)
             write_json(
                 state_path,
                 {
@@ -513,10 +544,11 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
                     "phase": "starting",
                     "child_pid": None,
                     "last_exit_code": last_exit_code,
+                    "proxy_jump": proxy_jump,
                 },
             )
             try:
-                child = subprocess.Popen(command)
+                child = subprocess.Popen(build_ssh_command(proxy))
             except OSError as exc:
                 print(f"{now_iso()} failed to execute SSH: {exc}", file=sys.stderr, flush=True)
                 write_json(
@@ -527,6 +559,7 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
                         "child_pid": None,
                         "last_exit_code": last_exit_code,
                         "error": str(exc),
+                        "proxy_jump": proxy_jump,
                     },
                 )
                 stop_event.wait(proxy["restart_delay"])
@@ -540,6 +573,7 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
                     "child_pid": child.pid,
                     "command_started_at": now_iso(),
                     "last_exit_code": last_exit_code,
+                    "proxy_jump": proxy_jump,
                 },
             )
             exit_code = child.wait()
@@ -561,6 +595,7 @@ def supervise(config: Dict[str, Any], name: str, token: str) -> int:
                     "phase": "restarting",
                     "child_pid": None,
                     "last_exit_code": exit_code,
+                    "proxy_jump": proxy_jump,
                 },
             )
             stop_event.wait(proxy["restart_delay"])
@@ -600,6 +635,7 @@ def render_status_html(config: Dict[str, Any]) -> str:
             f"<td><span class=\"badge {css_class}\">{html.escape(proxy['phase'])}</span></td>"
             f"<td>{html.escape(proxy['socks_endpoint'])}</td>"
             f"<td>{html.escape(proxy['ssh_target'])}</td>"
+            f"<td>{html.escape(proxy['proxy_jump'] or '-')}</td>"
             f"<td>{proxy['pid'] or '-'}</td>"
             f"<td>{proxy['child_pid'] or '-'}</td>"
             f"<td>{proxy['last_exit_code'] if proxy['last_exit_code'] is not None else '-'}</td>"
@@ -631,7 +667,7 @@ def render_status_html(config: Dict[str, Any]) -> str:
   <h1>SSH 代理状态</h1>
   <p>每 5 秒刷新。JSON API：<code>/api/status</code></p>
   <table>
-    <thead><tr><th>名称</th><th>默认启动</th><th>状态</th><th>SOCKS5</th><th>SSH 目标</th><th>Supervisor PID</th><th>SSH PID</th><th>最近退出码</th><th>启动时间</th></tr></thead>
+    <thead><tr><th>名称</th><th>默认启动</th><th>状态</th><th>SOCKS5</th><th>SSH 目标</th><th>ProxyJump</th><th>Supervisor PID</th><th>SSH PID</th><th>最近退出码</th><th>启动时间</th></tr></thead>
     <tbody>{''.join(rows)}</tbody>
   </table>
   <p>更新时间：{html.escape(payload['generated_at'])}</p>
@@ -788,12 +824,17 @@ def stop_web(config: Dict[str, Any]) -> Tuple[bool, str]:
 
 
 def print_proxy_statuses(statuses: List[Dict[str, Any]]) -> None:
-    print(f"{'NAME':<20} {'STATUS':<12} {'SOCKS5':<24} {'PID':<8} SSH TARGET")
+    print(
+        f"{'NAME':<20} {'STATUS':<12} {'SOCKS5':<24} "
+        f"{'PROXYJUMP':<20} {'PID':<8} SSH TARGET"
+    )
     for status in statuses:
         pid = str(status["pid"]) if status["pid"] else "-"
+        proxy_jump = status["proxy_jump"] or "-"
         print(
             f"{status['name']:<20} {status['phase']:<12} "
-            f"{status['socks_endpoint']:<24} {pid:<8} {status['ssh_target']}"
+            f"{status['socks_endpoint']:<24} {proxy_jump:<20} "
+            f"{pid:<8} {status['ssh_target']}"
         )
 
 
