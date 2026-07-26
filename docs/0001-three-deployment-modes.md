@@ -5,6 +5,7 @@ Author: wxyucs
 Status: Final
 Type: Standards Track
 Created: 2026-07-26
+Superseded-By: SEP 2 (macOS lifecycle), SEP 3 (macOS status interface)
 ```
 
 # 摘要
@@ -17,6 +18,9 @@ Created: 2026-07-26
 
 三种方案都提供 SSH 动态端口转发。原生方案只提供 SOCKS5；Container 方案额外
 通过 Privoxy 提供 HTTP/HTTPS 代理。
+
+SEP 2 和 SEP 3 已取代本文的 macOS 生命周期与状态管理部分。Container 和
+Linux 规范不受影响。
 
 # 动机
 
@@ -96,6 +100,8 @@ macOS 和 Linux 使用同一组配置字段，默认路径为：
 必须在调用 SSH 前失败并输出可理解的错误。
 
 ## macOS 生命周期
+
+> 本节已被 SEP 2 和 SEP 3 取代，仅保留为历史设计记录。
 
 macOS 方案使用用户级 launchd agent：
 

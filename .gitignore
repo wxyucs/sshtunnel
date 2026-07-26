@@ -2,4 +2,7 @@ container/my.env
 container/ssh_keys/*
 !container/ssh_keys/.gitkeep
 macos/config.env
+macos/config.json
 linux/config.env
+__pycache__/
+*.pyc

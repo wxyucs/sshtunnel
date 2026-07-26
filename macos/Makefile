@@ -1,8 +1,7 @@
-.PHONY: install uninstall start stop restart status logs test
+.PHONY: install uninstall start stop restart status web-start web-stop web-status logs test
 
-LABEL := com.wxyucs.sshtunnel
-DOMAIN := gui/$(shell id -u)
-PLIST := $(HOME)/Library/LaunchAgents/$(LABEL).plist
+CLI ?= $(HOME)/.local/bin/sshtunnel
+PROXY ?= primary
 
 install:
 	./install.sh
@@ -11,21 +10,28 @@ uninstall:
 	./uninstall.sh
 
 start:
-	@launchctl print $(DOMAIN)/$(LABEL) >/dev/null 2>&1 || launchctl bootstrap $(DOMAIN) $(PLIST)
-	launchctl kickstart $(DOMAIN)/$(LABEL)
+	$(CLI) start --web
 
 stop:
-	launchctl bootout $(DOMAIN)/$(LABEL)
+	$(CLI) stop --web
 
 restart:
-	@launchctl print $(DOMAIN)/$(LABEL) >/dev/null 2>&1 || launchctl bootstrap $(DOMAIN) $(PLIST)
-	launchctl kickstart -k $(DOMAIN)/$(LABEL)
+	$(CLI) restart --web
 
 status:
-	launchctl print $(DOMAIN)/$(LABEL)
+	$(CLI) status
+
+web-start:
+	$(CLI) web start
+
+web-stop:
+	$(CLI) web stop
+
+web-status:
+	$(CLI) web status
 
 logs:
-	log stream --style compact --predicate 'process == "ssh"'
+	$(CLI) logs -f $(PROXY)
 
 test:
-	curl --fail --show-error --proxy socks5h://127.0.0.1:1080 https://ifconfig.me
+	python3 -m unittest discover -s tests -v

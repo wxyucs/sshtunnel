@@ -5,7 +5,7 @@
 | 方案 | 服务管理 | SOCKS5 | HTTP/HTTPS | 适合场景 |
 | --- | --- | --- | --- | --- |
 | [`container/`](container/) | Docker restart policy | `127.0.0.1:1080` | `127.0.0.1:1087` | 已使用 Docker、需要环境隔离 |
-| [`macos/`](macos/) | launchd | `127.0.0.1:1080` | - | macOS 长期后台运行 |
+| [`macos/`](macos/) | detached CLI supervisor | 每个代理独立配置 | - | macOS 多代理后台运行与 Web 状态 |
 | [`linux/`](linux/) | systemd user service | `127.0.0.1:1080` | - | Linux 长期后台运行 |
 
 原生方案直接使用系统的 OpenSSH，并默认开启：
@@ -32,8 +32,8 @@ make run
 ```sh
 cd macos
 ./install.sh
-vi ~/.config/sshtunnel/config.env
-make restart
+vi ~/.config/sshtunnel/config.json
+sshtunnel start --web
 ```
 
 ### Linux
@@ -52,4 +52,6 @@ systemctl --user restart sshtunnel
 项目使用类似 Python Enhancement Proposal（PEP）的提案文档记录重要设计决策：
 
 - [SEP 1：三种 SSH 隧道部署模式](docs/0001-three-deployment-modes.md)
+- [SEP 2：macOS detached 多代理命令行生命周期](docs/0002-macos-detached-multi-proxy-cli.md)
+- [SEP 3：macOS 代理状态 Web 接口](docs/0003-macos-status-web.md)
 - [SEP 文档索引](docs/0000-index.md)

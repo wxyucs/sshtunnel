@@ -1,11 +1,12 @@
 #!/bin/sh
 set -eu
 
-PLIST="$HOME/Library/LaunchAgents/com.wxyucs.sshtunnel.plist"
-DOMAIN="gui/$(id -u)"
+BIN="$HOME/.local/bin/sshtunnel"
 
-launchctl bootout "$DOMAIN" "$PLIST" >/dev/null 2>&1 || true
-rm -f "$PLIST" "$HOME/.local/libexec/sshtunnel/run"
+if [ -x "$BIN" ]; then
+    "$BIN" stop --web >/dev/null 2>&1 || true
+fi
+rm -f "$BIN"
 
-echo "Removed the launch agent and runner."
-echo "Configuration was preserved at $HOME/.config/sshtunnel/config.env"
+echo "Removed the sshtunnel CLI."
+echo "Configuration, runtime state, and logs were preserved."

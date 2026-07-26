@@ -16,3 +16,5 @@ SEP 编号一经分配不再复用。提案状态采用：
 | SEP | 标题 | 类型 | 状态 |
 | --- | --- | --- | --- |
 | [1](0001-three-deployment-modes.md) | 三种 SSH 隧道部署模式 | Standards Track | Final |
+| [2](0002-macos-detached-multi-proxy-cli.md) | macOS detached 多代理命令行生命周期 | Standards Track | Final |
+| [3](0003-macos-status-web.md) | macOS 代理状态 Web 接口 | Standards Track | Final |
