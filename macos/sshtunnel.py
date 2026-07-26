@@ -13,6 +13,7 @@ import os
 import re
 import signal
 import socket
+import socketserver
 import subprocess
 import sys
 import threading
@@ -33,6 +34,16 @@ _DETACHED_CHILDREN: List[subprocess.Popen[Any]] = []
 
 class ConfigError(ValueError):
     pass
+
+
+class LocalThreadingHTTPServer(ThreadingHTTPServer):
+    """HTTP server that avoids HTTPServer's unnecessary FQDN lookup."""
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
 
 
 def now_iso() -> str:
@@ -679,7 +690,7 @@ def serve_web(config: Dict[str, Any], token: str) -> int:
     port = config["web"]["port"]
     state_path = web_state_path(config)
     print(f"{now_iso()} web: binding {host}:{port}", file=sys.stderr, flush=True)
-    server = ThreadingHTTPServer((host, port), make_handler(config["path"]))
+    server = LocalThreadingHTTPServer((host, port), make_handler(config["path"]))
     server.daemon_threads = True
     print(f"{now_iso()} web: socket ready", file=sys.stderr, flush=True)
     lease_file, held_lease_path = acquire_process_lease(config, token)
